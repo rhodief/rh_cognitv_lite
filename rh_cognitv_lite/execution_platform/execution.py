@@ -84,11 +84,11 @@ class CheckSchema:
 class Execution(BaseModel):
     name: str
     description: str | None = None
+    kind: str | None = None
     handler: Callable[..., Any]
     input_data: ExecutionData | Any = None
     preconditions: list[Callable[[ExecutionData], bool]] | None = None
     postconditions: list[Callable[[ExecutionData], bool]] | None = None
-    kind: str | None = None
     group_id: str | None = None
     policies: list[Any] | None = None
     attempt: int = 1  # set by runners on retry; drives retried= in emitted events
