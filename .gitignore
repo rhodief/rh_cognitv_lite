@@ -1,0 +1,6 @@
+.env
+.pypirc
+rh_cognitv_lite.egg-info
+__pycache__
+dist
+build
