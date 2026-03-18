@@ -75,8 +75,8 @@ class SequenceRunner:
         # Emit sequence.started once, before any timeout wrapper.
         await self._platform.event_bus.publish(
             ExecutionEvent(
-                name="sequence",
-                kind="sequence.started",
+                name=self._group_name or "sequence",
+                kind="execution.sequence",
                 payload={},
                 status=EventStatus.STARTED,
                 group_id=self._group_name,
@@ -93,8 +93,8 @@ class SequenceRunner:
                 if all(r.ok for r in results):
                     await self._platform.event_bus.publish(
                         ExecutionEvent(
-                            name="sequence",
-                            kind="sequence.completed",
+                            name=self._group_name or "sequence",
+                            kind="execution.sequence",
                             payload={},
                             status=EventStatus.COMPLETED,
                             retried=attempt - 1,
@@ -114,8 +114,8 @@ class SequenceRunner:
                 if not retryable or attempt >= max_attempts:
                     await self._platform.event_bus.publish(
                         ExecutionEvent(
-                            name="sequence",
-                            kind="sequence.failed",
+                            name=self._group_name or "sequence",
+                            kind="execution.sequence",
                             payload={},
                             status=EventStatus.FAILED,
                             retried=attempt - 1,
@@ -128,8 +128,8 @@ class SequenceRunner:
                 delay = self._retry_config.delay_for(attempt) if self._retry_config else 0.0
                 await self._platform.event_bus.publish(
                     ExecutionEvent(
-                        name="sequence",
-                        kind="sequence.retrying",
+                        name=self._group_name or "sequence",
+                        kind="execution.sequence",
                         payload={},
                         status=EventStatus.RETRYING,
                         retried=attempt,
@@ -159,8 +159,8 @@ class SequenceRunner:
                 )
                 await self._platform.event_bus.publish(
                     ExecutionEvent(
-                        name="sequence",
-                        kind="sequence.failed",
+                        name=self._group_name or "sequence",
+                        kind="execution.sequence",
                         payload={},
                         status=EventStatus.FAILED,
                         group_id=self._group_name,
@@ -344,8 +344,8 @@ class ParallelRunner:
 
         await self._platform.event_bus.publish(
             ExecutionEvent(
-                name="parallel",
-                kind="parallel.started",
+                name=self._group_name or "parallel",
+                kind="execution.parallel",
                 payload={},
                 status=EventStatus.STARTED,
                 group_id=self._group_name,
@@ -396,8 +396,8 @@ class ParallelRunner:
                 delay = self._retry_config.delay_for(attempt) if self._retry_config else 0.0
                 await self._platform.event_bus.publish(
                     ExecutionEvent(
-                        name="parallel",
-                        kind="parallel.retrying",
+                        name=self._group_name or "parallel",
+                        kind="execution.parallel",
                         payload={},
                         status=EventStatus.RETRYING,
                         retried=attempt,
@@ -427,7 +427,7 @@ class ParallelRunner:
             event_status = EventStatus.COMPLETED if all_ok else EventStatus.FAILED
             await self._platform.event_bus.publish(
                 ExecutionEvent(
-                    name="parallel",
+                    name=self._group_name or "parallel",
                     kind=event_kind,
                     payload={},
                     status=event_status,
@@ -451,8 +451,8 @@ class ParallelRunner:
                 )
                 await self._platform.event_bus.publish(
                     ExecutionEvent(
-                        name="parallel",
-                        kind="parallel.failed",
+                        name=self._group_name or "parallel",
+                        kind="execution.parallel",
                         payload={},
                         status=EventStatus.FAILED,
                         group_id=self._group_name,

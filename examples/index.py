@@ -76,8 +76,8 @@ async def parallel_execution():
 
 async def main():
     #await basic_execution()
-    await sequence_execution()
-    #await parallel_execution()
+    #await sequence_execution()
+    await parallel_execution()
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
