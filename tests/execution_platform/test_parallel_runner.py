@@ -40,9 +40,9 @@ def _platform(*, checker=None) -> tuple[EventBus, ExecutionPlatform]:
 
 def _par_events(bus: EventBus) -> list[str]:
     return [
-        e.kind
+        f"{e.kind}.{e.status.value}"
         for e in bus.events
-        if isinstance(e, ExecutionEvent) and e.kind.startswith("parallel.")
+        if isinstance(e, ExecutionEvent) and e.kind == "execution.parallel"
     ]
 
 
@@ -401,8 +401,8 @@ async def test_parallel_started_event_emitted():
         await par.run()
 
     kinds = _par_events(bus)
-    assert "parallel.started" in kinds
-    assert kinds.index("parallel.started") == 0
+    assert "execution.parallel.started" in kinds
+    assert kinds.index("execution.parallel.started") == 0
 
 
 @pytest.mark.asyncio
@@ -413,8 +413,8 @@ async def test_parallel_completed_event_emitted():
         await par.run()
 
     kinds = _par_events(bus)
-    assert "parallel.completed" in kinds
-    assert "parallel.failed" not in kinds
+    assert "execution.parallel.completed" in kinds
+    assert "execution.parallel.failed" not in kinds
 
 
 @pytest.mark.asyncio
@@ -426,5 +426,5 @@ async def test_parallel_failed_event_emitted():
         await par.run()
 
     kinds = _par_events(bus)
-    assert "parallel.failed" in kinds
-    assert "parallel.completed" not in kinds
+    assert "execution.parallel.failed" in kinds
+    assert "execution.parallel.completed" not in kinds

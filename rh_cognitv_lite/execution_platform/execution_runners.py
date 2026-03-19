@@ -423,12 +423,11 @@ class ParallelRunner:
             ]
 
             all_ok = all(r.ok for r in final)
-            event_kind = "parallel.completed" if all_ok else "parallel.failed"
             event_status = EventStatus.COMPLETED if all_ok else EventStatus.FAILED
             await self._platform.event_bus.publish(
                 ExecutionEvent(
                     name=self._group_name or "parallel",
-                    kind=event_kind,
+                    kind="execution.parallel",
                     payload={},
                     status=event_status,
                     retried=attempt - 1,

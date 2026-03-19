@@ -52,11 +52,11 @@ def _platform(*, checker=None) -> tuple[EventBus, ExecutionPlatform]:
 
 
 def _seq_events(bus: EventBus) -> list[str]:
-    """Return all sequence-scoped event kinds from the bus."""
+    """Return 'execution.sequence.<status>' strings for all sequence-scoped events."""
     return [
-        e.kind
+        f"{e.kind}.{e.status.value}"
         for e in bus.events
-        if isinstance(e, ExecutionEvent) and e.kind.startswith("sequence.")
+        if isinstance(e, ExecutionEvent) and e.kind == "execution.sequence"
     ]
 
 
@@ -473,8 +473,8 @@ async def test_sequence_started_event_emitted():
         await seq.run()
 
     kinds = _seq_events(bus)
-    assert "sequence.started" in kinds
-    assert kinds.index("sequence.started") == 0
+    assert "execution.sequence.started" in kinds
+    assert kinds.index("execution.sequence.started") == 0
 
 
 @pytest.mark.asyncio
@@ -486,8 +486,8 @@ async def test_sequence_completed_event_emitted():
         await seq.run()
 
     kinds = _seq_events(bus)
-    assert "sequence.completed" in kinds
-    assert "sequence.failed" not in kinds
+    assert "execution.sequence.completed" in kinds
+    assert "execution.sequence.failed" not in kinds
 
 
 @pytest.mark.asyncio
@@ -503,5 +503,5 @@ async def test_sequence_failed_event_emitted():
         await seq.run()
 
     kinds = _seq_events(bus)
-    assert "sequence.failed" in kinds
-    assert "sequence.completed" not in kinds
+    assert "execution.sequence.failed" in kinds
+    assert "execution.sequence.completed" not in kinds
