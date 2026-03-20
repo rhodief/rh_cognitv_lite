@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from pydantic import BaseModel
 
 from rh_cognitv_lite.execution_platform import (
@@ -6,6 +8,7 @@ from rh_cognitv_lite.execution_platform import (
 from rh_cognitv_lite.execution_platform.errors import TransientError
 from rh_cognitv_lite.execution_platform.event_bus import EventBus
 from rh_cognitv_lite.execution_platform.execution import Execution
+from rh_cognitv_lite.execution_platform import ExecutionData
 from rh_cognitv_lite.execution_platform.models import RetryConfig
 
 event_bus = EventBus()
@@ -37,12 +40,21 @@ async def sequence_execution():
         return {"greeting": f"Hello, {value}!"} if value else {"greeting": "Hello, World!"}
     def handler_fail(value: str):
         raise TransientError(message='Ops erro teste')
+    
+    def precondition(value: ExecutionData):
+        value = cast(dict, value)
+        valid = value.get('value', 0) < 10
+        if not valid:
+            raise Exception('Ooops')
+        return valid
+    
     exec_ok = Execution(
             name="Execuçao Sucesso",
             kind="TIPO_EVENTO",
             description='Essa é uma descrição teste',
             input_data={'value': 23},
-            handler=handler_ok
+            handler=handler_ok,
+            preconditions=[precondition]
         )
     exec_fail = Execution(
             name="Execução Falha",
@@ -76,8 +88,8 @@ async def parallel_execution():
 
 async def main():
     #await basic_execution()
-    #await sequence_execution()
-    await parallel_execution()
+    await sequence_execution()
+    #await parallel_execution()
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
