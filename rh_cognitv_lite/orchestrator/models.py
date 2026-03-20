@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from rh_cognitv_lite.orchestrator._engine import _GraphEngine
+from rh_cognitv_lite.orchestrator.dag_engine import _GraphEngine
 
 
 class Node(BaseModel):
@@ -240,10 +240,27 @@ class DAG(BaseModel):
         )
 
     def visualize(self, output_configs: Any = None) -> None:
-        """Delegate to DAGVisualizer. Implemented in Phase 5."""
-        raise NotImplementedError(
-            "DAGVisualizer is not yet implemented (Phase 5)."
-        )
+        """Render this DAG via DAGVisualizer.
+
+        Parameters
+        ----------
+        output_configs:
+            Passed directly to ``DAGVisualizer.render()``.  May be a format
+            string (e.g. ``"terminal"``, ``"json"``) or a dict with a
+            ``"format"`` key and optional extra keys.  Defaults to
+            ``"terminal"`` when ``None``.
+        """
+        # Import deferred to avoid circular imports at module load time.
+        from rh_cognitv_lite.orchestrator.dag_visualizer import DAGVisualizer
+        viz = DAGVisualizer(self)
+        if output_configs is None:
+            viz.render("terminal")
+        elif isinstance(output_configs, str):
+            viz.render(output_configs)  # type: ignore[arg-type]
+        else:
+            fmt = output_configs.get("format", "terminal")
+            opts = {k: v for k, v in output_configs.items() if k != "format"}
+            viz.render(fmt, **opts)
 
 
 class NodeGroup(Node):

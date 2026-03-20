@@ -371,9 +371,17 @@ class TestCopy:
 
 # ═════════════════════════════════════════════════════════════════════════════
 class TestVisualize:
-    def test_raises_not_implemented(self, simple):
-        with pytest.raises(NotImplementedError):
-            simple.visualize()
+    def test_visualize_terminal_runs(self, simple, capsys):
+        simple.visualize()  # default → terminal; must not raise
+        captured = capsys.readouterr()
+        assert "a" in captured.out
+
+    def test_visualize_json_runs(self, simple, capsys):
+        simple.visualize("json")
+        captured = capsys.readouterr()
+        import json
+        parsed = json.loads(captured.out)
+        assert "nodes" in parsed
 
 
 # ═════════════════════════════════════════════════════════════════════════════
