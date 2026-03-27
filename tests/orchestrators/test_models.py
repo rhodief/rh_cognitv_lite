@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from rh_cognitv_lite.orchestrator.models import (
+from rh_cognitv_lite.orchestrators.graphs.models import (
     DAG,
     DAGBuilderConfig,
     Edge,

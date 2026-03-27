@@ -5,8 +5,8 @@ This is the sole legitimate way to construct a DAG instance.
 
 from __future__ import annotations
 
-from rh_cognitv_lite.orchestrator.dag_engine import _GraphEngine
-from rh_cognitv_lite.orchestrator.models import (
+from rh_cognitv_lite.orchestrators.graphs.dag_engine import _GraphEngine
+from rh_cognitv_lite.orchestrators.graphs.models import (
     DAG,
     DAGBuilderConfig,
     Edge,

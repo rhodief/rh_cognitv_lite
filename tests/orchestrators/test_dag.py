@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from rh_cognitv_lite.orchestrator.models import DAG, Edge, Node, NodeGroup
+from rh_cognitv_lite.orchestrators.graphs.models import DAG, Edge, Node, NodeGroup
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

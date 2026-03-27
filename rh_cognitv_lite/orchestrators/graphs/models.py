@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from rh_cognitv_lite.orchestrator.dag_engine import _GraphEngine
+from rh_cognitv_lite.orchestrators.graphs.dag_engine import _GraphEngine
 
 
 class Node(BaseModel):
@@ -251,7 +251,7 @@ class DAG(BaseModel):
             ``"terminal"`` when ``None``.
         """
         # Import deferred to avoid circular imports at module load time.
-        from rh_cognitv_lite.orchestrator.dag_visualizer import DAGVisualizer
+        from rh_cognitv_lite.orchestrators.graphs.dag_visualizer import DAGVisualizer
         viz = DAGVisualizer(self)
         if output_configs is None:
             viz.render("terminal")

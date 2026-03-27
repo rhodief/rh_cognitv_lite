@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rh_cognitv_lite.orchestrator.dag_engine import _GraphEngine
+from rh_cognitv_lite.orchestrators.graphs.dag_engine import _GraphEngine
 
 
 # ─────────────────────────────────────────────

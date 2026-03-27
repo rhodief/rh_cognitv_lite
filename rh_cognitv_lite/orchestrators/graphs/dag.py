@@ -11,9 +11,9 @@ Phase 4 — DAGBuilder fluent API.
 Phase 5 — DAGVisualizer.
 """
 
-from rh_cognitv_lite.orchestrator.dag_builder import DAGBuilder
-from rh_cognitv_lite.orchestrator.dag_visualizer import DAGVisualizer
-from rh_cognitv_lite.orchestrator.models import (
+from rh_cognitv_lite.orchestrators.graphs.dag_builder import DAGBuilder
+from rh_cognitv_lite.orchestrators.graphs.dag_visualizer import DAGVisualizer
+from rh_cognitv_lite.orchestrators.graphs.models import (
     DAG,
     DAGBuilderConfig,
     Edge,

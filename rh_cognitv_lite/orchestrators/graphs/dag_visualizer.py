@@ -14,7 +14,7 @@ import json as _json
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from rh_cognitv_lite.orchestrator.models import DAG, Node, NodeGroup
+    from rh_cognitv_lite.orchestrators.graphs.models import DAG, Node, NodeGroup
 
 
 class DAGVisualizer:
@@ -29,7 +29,7 @@ class DAGVisualizer:
 
     def __init__(self, dag: DAG) -> None:
         # Import here to avoid a circular import at module load time.
-        from rh_cognitv_lite.orchestrator.models import DAG as _DAG  # noqa: F401
+        from rh_cognitv_lite.orchestrators.graphs.models import DAG as _DAG  # noqa: F401
         self._dag = dag
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ class DAGVisualizer:
 
 def _dag_to_dict(dag: DAG) -> dict[str, Any]:
     """Recursively convert a DAG (and any nested NodeGroups) to a plain dict."""
-    from rh_cognitv_lite.orchestrator.models import NodeGroup
+    from rh_cognitv_lite.orchestrators.graphs.models import NodeGroup
 
     nodes_out = []
     for node in dag.nodes_data:
@@ -127,7 +127,7 @@ def _dag_to_dict(dag: DAG) -> dict[str, Any]:
 
 def _render_dag_terminal(dag: DAG, lines: list[str], indent: int) -> None:
     """Append terminal-tree lines for *dag* and all nested groups."""
-    from rh_cognitv_lite.orchestrator.models import NodeGroup, _GraphEngine
+    from rh_cognitv_lite.orchestrators.graphs.models import NodeGroup, _GraphEngine
 
     prefix = "  " * indent
 

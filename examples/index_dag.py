@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from rh_cognitv_lite.orchestrator.dag import (
+from rh_cognitv_lite.orchestrators.graphs.dag import (
     DAG,
     DAGBuilder,
     DAGBuilderConfig,
