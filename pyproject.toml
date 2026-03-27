@@ -15,7 +15,8 @@ authors = [
 dependencies = [
     "pydantic>=2.12.5",
     "jsonpatch>=1.33",
-    "ulid-py>=1.1.0"
+    "ulid-py>=1.1.0",
+    "jsonschema>=4.26.0"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -33,7 +34,8 @@ exclude = ["tests", "tests.*"]
 [tool.setuptools.package-data]
 "rh_cognitv_lite" = ["py.typed"]
 "rh_cognitv_lite.execution_platform" = ["py.typed"]
-"rh_cognitv_lite.orchestrator" = ["py.typed"]
+"rh_cognitv_lite.orchestrators" = ["py.typed"]
+"rh_cognitv_lite.orchestrators.graphs" = ["py.typed"]
 "rh_cognitv_lite.cognitive" = ["py.typed"]
 
 [tool.pytest.ini_options]
