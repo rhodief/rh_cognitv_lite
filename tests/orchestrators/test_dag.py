@@ -1,4 +1,4 @@
-"""Phase 3 — DAG traversal class tests.
+"""Phase 3 — Graph/DAG traversal class tests.
 
 Graph fixtures
 --------------
@@ -11,6 +11,7 @@ NESTED_GRP  outer: outer_grp → z where outer_grp.inner = (inner_grp → y)
             and inner_grp.inner = (x1 → x2)
 MULTI_ENTRY a → c, b → c (a and b are both entries)
 DISCONNECTED a → b, c (c is isolated — used for connectedness tests)
+CYCLIC_SIMPLE  a → b → c → a (back-edge: c→a)
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import json
 
 import pytest
 
-from rh_cognitv_lite.orchestrators.graphs.models import DAG, Edge, Node, NodeGroup
+from rh_cognitv_lite.orchestrators.graphs.models import DAG, Graph, Edge, Node, NodeGroup
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -507,3 +508,202 @@ class TestIntegration:
         assert dag.would_create_cycle(c, a) is True
         # a → c is a long forward edge — no cycle
         assert dag.would_create_cycle(a, c) is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# New Graph API tests (cyclic support, node_by_id, edges_from/to, render model)
+# ═════════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture()
+def cyclic_simple():
+    """a → b → c → a  (back-edge: c→a creates a cycle)"""
+    a, b, c = node("a"), node("b"), node("c")
+    return Graph._from_parts([a, b, c], [edge("a", "b"), edge("b", "c"), edge("c", "a")])
+
+
+@pytest.fixture()
+def self_loop():
+    """a → a"""
+    a = node("a")
+    return Graph._from_parts([a], [edge("a", "a")])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestHasCycleIsAcyclic:
+    def test_acyclic_graph_has_no_cycle(self, simple):
+        assert simple.has_cycle() is False
+
+    def test_acyclic_graph_is_acyclic(self, simple):
+        assert simple.is_acyclic() is True
+
+    def test_cyclic_graph_has_cycle(self, cyclic_simple):
+        assert cyclic_simple.has_cycle() is True
+
+    def test_cyclic_graph_is_not_acyclic(self, cyclic_simple):
+        assert cyclic_simple.is_acyclic() is False
+
+    def test_self_loop_has_cycle(self, self_loop):
+        assert self_loop.has_cycle() is True
+
+    def test_diamond_is_acyclic(self, diamond):
+        assert diamond.is_acyclic() is True
+
+    def test_empty_graph_is_acyclic(self):
+        g = Graph._from_parts([], [])
+        assert g.is_acyclic() is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestCyclicGraphTraversal:
+    def test_cyclic_graph_has_no_entry_nodes(self, cyclic_simple):
+        # every node has a predecessor → no entry nodes
+        assert cyclic_simple.entry_nodes() == set()
+
+    def test_cyclic_graph_has_no_leaf_nodes(self, cyclic_simple):
+        # every node has a successor → no leaf nodes
+        assert cyclic_simple.leaf_nodes() == set()
+
+    def test_cyclic_next_nodes(self, cyclic_simple):
+        a = next(n for n in cyclic_simple.nodes_data if n.id == "a")
+        assert {n.id for n in cyclic_simple.next_nodes_from(a)} == {"b"}
+
+    def test_cyclic_prev_nodes(self, cyclic_simple):
+        a = next(n for n in cyclic_simple.nodes_data if n.id == "a")
+        assert {n.id for n in cyclic_simple.prev_nodes_from(a)} == {"c"}
+
+    def test_cyclic_descendants_of_terminates(self, cyclic_simple):
+        """descendants_of must terminate even in a cyclic graph."""
+        a = next(n for n in cyclic_simple.nodes_data if n.id == "a")
+        desc = {n.id for n in cyclic_simple.descendants_of(a)}
+        # In a → b → c → a, all nodes are reachable from a (including a via cycle)
+        assert "b" in desc
+        assert "c" in desc
+
+    def test_cyclic_path_between_terminates(self, cyclic_simple):
+        a = next(n for n in cyclic_simple.nodes_data if n.id == "a")
+        c = next(n for n in cyclic_simple.nodes_data if n.id == "c")
+        path = cyclic_simple.path_between(a, c)
+        assert path is not None
+        assert path[0].id == "a"
+        assert path[-1].id == "c"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestNodeById:
+    def test_node_by_id_returns_correct_node(self, simple):
+        n = simple.node_by_id("b")
+        assert n.id == "b"
+
+    def test_node_by_id_raises_on_missing(self, simple):
+        with pytest.raises(KeyError):
+            simple.node_by_id("z")
+
+    def test_nodes_by_ids_returns_all(self, diamond):
+        nodes = diamond.nodes_by_ids({"a", "d"})
+        assert {n.id for n in nodes} == {"a", "d"}
+
+    def test_nodes_by_ids_empty_set(self, simple):
+        assert len(simple.nodes_by_ids(set())) == 0
+
+    def test_nodes_by_ids_raises_on_missing(self, simple):
+        with pytest.raises(KeyError):
+            simple.nodes_by_ids({"a", "z"})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestEdgesFromTo:
+    def test_edges_from_returns_outgoing(self, simple):
+        a = simple.node_by_id("a")
+        edges = simple.edges_from(a)
+        assert len(edges) == 1
+        assert edges[0].source == "a"
+        assert edges[0].target == "b"
+
+    def test_edges_from_leaf_is_empty(self, simple):
+        c = simple.node_by_id("c")
+        assert simple.edges_from(c) == []
+
+    def test_edges_to_returns_incoming(self, simple):
+        b = simple.node_by_id("b")
+        edges = simple.edges_to(b)
+        assert len(edges) == 1
+        assert edges[0].source == "a"
+        assert edges[0].target == "b"
+
+    def test_edges_to_entry_is_empty(self, simple):
+        a = simple.node_by_id("a")
+        assert simple.edges_to(a) == []
+
+    def test_edges_from_diamond_fork(self, diamond):
+        a = diamond.node_by_id("a")
+        targets = {e.target for e in diamond.edges_from(a)}
+        assert targets == {"b", "c"}
+
+    def test_edges_to_diamond_join(self, diamond):
+        d = diamond.node_by_id("d")
+        sources = {e.source for e in diamond.edges_to(d)}
+        assert sources == {"b", "c"}
+
+    def test_edges_from_with_label(self):
+        a, b = node("a"), node("b")
+        g = Graph._from_parts([a, b], [Edge(source="a", target="b", label="lbl")])
+        edges = g.edges_from(a)
+        assert edges[0].label == "lbl"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestToRenderModel:
+    def test_acyclic_model_is_not_cyclic(self, simple):
+        model = simple.to_render_model()
+        assert model.is_cyclic is False
+
+    def test_cyclic_model_is_cyclic(self, cyclic_simple):
+        model = cyclic_simple.to_render_model()
+        assert model.is_cyclic is True
+
+    def test_render_model_node_count(self, simple):
+        model = simple.to_render_model()
+        assert len(model.nodes) == 3
+
+    def test_render_model_edge_count(self, simple):
+        model = simple.to_render_model()
+        assert len(model.edges) == 2
+
+    def test_render_nodes_have_correct_ids(self, simple):
+        model = simple.to_render_model()
+        assert {rn.id for rn in model.nodes} == {"a", "b", "c"}
+
+    def test_acyclic_nodes_not_in_cycle(self, simple):
+        model = simple.to_render_model()
+        assert all(not rn.in_cycle for rn in model.nodes)
+
+    def test_cyclic_nodes_in_cycle(self, cyclic_simple):
+        model = cyclic_simple.to_render_model()
+        assert all(rn.in_cycle for rn in model.nodes)
+
+    def test_acyclic_edges_not_back_edges(self, simple):
+        model = simple.to_render_model()
+        assert all(not re.is_back_edge for re in model.edges)
+
+    def test_cyclic_has_back_edge(self, cyclic_simple):
+        model = cyclic_simple.to_render_model()
+        back = [re for re in model.edges if re.is_back_edge]
+        assert len(back) == 1
+        # The back-edge endpoints must both be cycle members
+        cycle_ids = {"a", "b", "c"}
+        assert back[0].source_id in cycle_ids
+        assert back[0].target_id in cycle_ids
+
+    def test_grouped_node_has_inner_model(self, grouped):
+        model = grouped.to_render_model()
+        grp_render = next(rn for rn in model.nodes if rn.id == "g")
+        assert grp_render.is_group is True
+        assert grp_render.inner is not None
+        inner_ids = {rn.id for rn in grp_render.inner.nodes}
+        assert inner_ids == {"a", "b"}
+
+    def test_plain_node_has_no_inner(self, simple):
+        model = simple.to_render_model()
+        for rn in model.nodes:
+            assert rn.inner is None
+            assert rn.is_group is False

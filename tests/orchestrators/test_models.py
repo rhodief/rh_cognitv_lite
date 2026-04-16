@@ -1,4 +1,4 @@
-"""Phase 1 unit tests — Node, NodeGroup, Edge, DAGBuilderConfig."""
+"""Unit tests — Node, NodeGroup, Edge, GraphBuilderConfig, DAGBuilderConfig (deprecated)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from rh_cognitv_lite.orchestrators.graphs.models import (
     DAG,
     DAGBuilderConfig,
     Edge,
+    Graph,
+    GraphBuilderConfig,
     Node,
     NodeGroup,
 )
@@ -101,7 +103,54 @@ class TestEdge:
 
 
 # ─────────────────────────────────────────────
-# DAGBuilderConfig
+# GraphBuilderConfig (new — permissive defaults)
+# ─────────────────────────────────────────────
+
+class TestGraphBuilderConfig:
+    def test_permissive_defaults(self):
+        cfg = GraphBuilderConfig()
+        assert cfg.append_only is False
+        assert cfg.validate_acyclic is False          # permissive
+        assert cfg.validate_connected is False
+        assert cfg.allow_isolated_nodes is True       # permissive
+        assert cfg.allow_self_loops is True           # permissive
+        assert cfg.allow_parallel_edges is False
+
+    def test_strict_dag_equivalent(self):
+        """Explicit flags replicate the old DAGBuilderConfig strict behaviour."""
+        cfg = GraphBuilderConfig(
+            validate_acyclic=True,
+            allow_isolated_nodes=False,
+            allow_self_loops=False,
+        )
+        assert cfg.validate_acyclic is True
+        assert cfg.allow_isolated_nodes is False
+        assert cfg.allow_self_loops is False
+
+    def test_all_flags_can_be_overridden(self):
+        cfg = GraphBuilderConfig(
+            append_only=True,
+            validate_acyclic=True,
+            validate_connected=True,
+            allow_isolated_nodes=False,
+            allow_self_loops=False,
+            allow_parallel_edges=True,
+        )
+        assert cfg.append_only is True
+        assert cfg.validate_acyclic is True
+        assert cfg.validate_connected is True
+        assert cfg.allow_isolated_nodes is False
+        assert cfg.allow_self_loops is False
+        assert cfg.allow_parallel_edges is True
+
+    def test_json_round_trip(self):
+        cfg = GraphBuilderConfig(validate_acyclic=True)
+        restored = GraphBuilderConfig.model_validate_json(cfg.model_dump_json())
+        assert restored == cfg
+
+
+# ─────────────────────────────────────────────
+# DAGBuilderConfig (deprecated — strict defaults preserved for backward compat)
 # ─────────────────────────────────────────────
 
 class TestDAGBuilderConfig:
@@ -142,22 +191,27 @@ class TestDAGBuilderConfig:
 
 class TestNodeGroup:
     def test_is_a_node(self):
-        group = NodeGroup(id="g1", name="Summarise", description="Sub-plan", inner=DAG())
+        group = NodeGroup(id="g1", name="Summarise", description="Sub-plan", inner=Graph())
         assert isinstance(group, Node)
 
-    def test_inner_dag_is_accessible(self):
-        dag = DAG()
-        group = NodeGroup(id="g1", name="Group", description="", inner=dag)
-        assert isinstance(group.inner, DAG)
+    def test_inner_graph_is_accessible(self):
+        graph = Graph()
+        group = NodeGroup(id="g1", name="Group", description="", inner=graph)
+        assert isinstance(group.inner, Graph)
+
+    def test_dag_alias_works_as_inner(self):
+        """DAG is an alias for Graph; NodeGroup.inner accepts both."""
+        group = NodeGroup(id="g1", name="Group", description="", inner=DAG())
+        assert isinstance(group.inner, Graph)
 
     def test_id_name_description_inherited(self):
-        group = NodeGroup(id="g1", name="G", description="desc", inner=DAG())
+        group = NodeGroup(id="g1", name="G", description="desc", inner=Graph())
         assert group.id == "g1"
         assert group.name == "G"
         assert group.description == "desc"
 
     def test_metadata_defaults_to_empty_dict(self):
-        group = NodeGroup(id="g1", name="G", description="", inner=DAG())
+        group = NodeGroup(id="g1", name="G", description="", inner=Graph())
         assert group.metadata == {}
 
     def test_inner_is_required(self):
@@ -165,8 +219,8 @@ class TestNodeGroup:
             NodeGroup(id="g1", name="G", description="")  # type: ignore[call-arg]
 
     def test_json_round_trip(self):
-        group = NodeGroup(id="g1", name="Group", description="A sub-plan", inner=DAG())
+        group = NodeGroup(id="g1", name="Group", description="A sub-plan", inner=Graph())
         restored = NodeGroup.model_validate_json(group.model_dump_json())
         assert restored.id == group.id
         assert restored.name == group.name
-        assert isinstance(restored.inner, DAG)
+        assert isinstance(restored.inner, Graph)

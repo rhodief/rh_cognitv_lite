@@ -1,6 +1,10 @@
-"""Phase 4 — DAGBuilder tests.
+"""Phase 4 — Builder tests: DAGBuilder (backward-compat) + GraphBuilder (new API).
 
-All tests import exclusively from the public API (dag.py).
+All tests import exclusively from the public API.
+- DAGBuilder / DAGBuilderConfig tests use dag.py (strict defaults: acyclic, no
+  self-loops, no isolated nodes).
+- GraphBuilder / GraphBuilderConfig tests use graph.py (permissive defaults:
+  cycles allowed, self-loops allowed, isolated nodes allowed).
 """
 
 from __future__ import annotations
@@ -14,6 +18,11 @@ from rh_cognitv_lite.orchestrators.graphs.dag import (
     Edge,
     Node,
     NodeGroup,
+)
+from rh_cognitv_lite.orchestrators.graphs.graph import (
+    Graph,
+    GraphBuilder,
+    GraphBuilderConfig,
 )
 
 
@@ -523,3 +532,229 @@ class TestIntegration:
         assert {x.id for x in extended.leaf_nodes()} == {"e"}
         a = next(x for x in extended.nodes_data if x.id == "a")
         assert {x.id for x in extended.descendants_of(a)} == {"b", "c", "d", "e"}
+
+
+# =============================================================================
+# GraphBuilder tests — permissive defaults (cycles / self-loops / isolated OK)
+# =============================================================================
+
+def gn(id: str) -> Node:
+    return Node(id=id, name=id.upper(), description="")
+
+
+def ggrp(id: str, inner: Graph) -> NodeGroup:
+    return NodeGroup(id=id, name=id.upper(), description="", inner=inner)
+
+
+@pytest.fixture()
+def linear_graph():
+    """a → b → c built with GraphBuilder."""
+    return (
+        GraphBuilder("linear")
+        .node(gn("a"))
+        .node(gn("b"))
+        .node(gn("c"))
+        .edge("a", "b")
+        .edge("b", "c")
+        .build()
+    )
+
+
+@pytest.fixture()
+def cyclic_graph():
+    """a → b → c → a  (cycle)."""
+    return (
+        GraphBuilder("cyclic")
+        .node(gn("a"))
+        .node(gn("b"))
+        .node(gn("c"))
+        .edge("a", "b")
+        .edge("b", "c")
+        .edge("c", "a")
+        .build()
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestGraphBuilderHappyPath:
+    def test_returns_graph_instance(self, linear_graph):
+        assert isinstance(linear_graph, Graph)
+
+    def test_node_ids(self, linear_graph):
+        assert {x.id for x in linear_graph.nodes_data} == {"a", "b", "c"}
+
+    def test_edge_count(self, linear_graph):
+        assert len(linear_graph.edges_data) == 2
+
+    def test_default_config_is_permissive(self):
+        cfg = GraphBuilder()._config
+        assert cfg.validate_acyclic is False
+        assert cfg.allow_isolated_nodes is True
+        assert cfg.allow_self_loops is True
+        assert cfg.allow_parallel_edges is False
+
+    def test_custom_config_stored(self):
+        cfg = GraphBuilderConfig(allow_parallel_edges=True)
+        b = GraphBuilder(config=cfg)
+        assert b._config.allow_parallel_edges is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestGraphBuilderCycles:
+    def test_cycle_allowed_by_default(self, cyclic_graph):
+        assert cyclic_graph.has_cycle() is True
+
+    def test_self_loop_allowed_by_default(self):
+        b = GraphBuilder().node(gn("a"))
+        b.edge("a", "a")  # must not raise
+        g = b.build()
+        assert g.has_cycle() is True
+
+    def test_cycle_rejected_when_acyclic_set(self):
+        cfg = GraphBuilderConfig(validate_acyclic=True)
+        b = (
+            GraphBuilder(config=cfg)
+            .node(gn("a"))
+            .node(gn("b"))
+            .edge("a", "b")
+        )
+        with pytest.raises(ValueError, match="cycle"):
+            b.edge("b", "a")
+
+    def test_self_loop_rejected_when_self_loops_false(self):
+        cfg = GraphBuilderConfig(allow_self_loops=False)
+        b = GraphBuilder(config=cfg).node(gn("a"))
+        with pytest.raises(ValueError, match="Self-loop"):
+            b.edge("a", "a")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestGraphBuilderIsolatedNodes:
+    def test_isolated_node_allowed_by_default(self):
+        g = (
+            GraphBuilder()
+            .node(gn("a"))
+            .node(gn("b"))
+            .node(gn("orphan"))
+            .edge("a", "b")
+            .build()
+        )
+        assert {x.id for x in g.nodes_data} == {"a", "b", "orphan"}
+
+    def test_isolated_node_rejected_when_flag_false(self):
+        cfg = GraphBuilderConfig(allow_isolated_nodes=False)
+        b = (
+            GraphBuilder(config=cfg)
+            .node(gn("a"))
+            .node(gn("b"))
+            .node(gn("orphan"))
+            .edge("a", "b")
+        )
+        with pytest.raises(ValueError, match="isolated"):
+            b.build()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestGraphBuilderParallelEdges:
+    def test_parallel_edge_rejected_by_default(self):
+        b = GraphBuilder().node(gn("a")).node(gn("b")).edge("a", "b")
+        with pytest.raises(ValueError, match="Parallel edge"):
+            b.edge("a", "b")
+
+    def test_parallel_edge_allowed_when_configured(self):
+        cfg = GraphBuilderConfig(allow_parallel_edges=True)
+        b = GraphBuilder(config=cfg).node(gn("a")).node(gn("b"))
+        b.edge("a", "b").edge("a", "b")  # no raise
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestGraphBuilderFromGraph:
+    def test_seeds_nodes_from_existing_graph(self, linear_graph):
+        b = GraphBuilder.from_graph(linear_graph)
+        assert {x.id for x in b._nodes} == {"a", "b", "c"}
+
+    def test_seeds_edges_from_existing_graph(self, linear_graph):
+        b = GraphBuilder.from_graph(linear_graph)
+        assert len(b._edges) == 2
+
+    def test_extend_after_seeding(self, linear_graph):
+        g = (
+            GraphBuilder.from_graph(linear_graph)
+            .node(gn("d"))
+            .edge("c", "d")
+            .build()
+        )
+        assert {x.id for x in g.nodes_data} == {"a", "b", "c", "d"}
+
+    def test_does_not_mutate_original(self, linear_graph):
+        original_count = len(linear_graph.nodes_data)
+        GraphBuilder.from_graph(linear_graph).node(gn("z")).build()
+        assert len(linear_graph.nodes_data) == original_count
+
+    def test_from_graph_with_custom_config(self, linear_graph):
+        cfg = GraphBuilderConfig(validate_acyclic=True)
+        b = GraphBuilder.from_graph(linear_graph, name="extended", config=cfg)
+        assert b._config.validate_acyclic is True
+
+    def test_from_graph_cycle_can_be_added_by_default(self, linear_graph):
+        """Default config allows adding back-edges."""
+        g = (
+            GraphBuilder.from_graph(linear_graph)
+            .edge("c", "a")  # back-edge — allowed by default
+            .build()
+        )
+        assert g.has_cycle() is True
+
+    def test_from_graph_cycle_rejected_with_acyclic_config(self, linear_graph):
+        cfg = GraphBuilderConfig(validate_acyclic=True)
+        b = GraphBuilder.from_graph(linear_graph, config=cfg)
+        with pytest.raises(ValueError, match="cycle"):
+            b.edge("c", "a")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestGraphBuilderVisualize:
+    def test_visualize_terminal_runs(self, linear_graph, capsys):
+        b = GraphBuilder.from_graph(linear_graph)
+        b.visualize()
+        captured = capsys.readouterr()
+        assert "a" in captured.out
+
+    def test_visualize_json_runs(self, linear_graph, capsys):
+        import json
+        b = GraphBuilder.from_graph(linear_graph)
+        b.visualize("json")
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert "nodes" in parsed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestGraphBuilderGroup:
+    def test_group_registers_nodegroup(self):
+        inner = GraphBuilder().node(gn("x")).node(gn("y")).edge("x", "y").build()
+        g_node = ggrp("g", inner)
+        outer = GraphBuilder().node(g_node).node(gn("z")).edge("g", "z").build()
+        grp_node = next(nd for nd in outer.nodes_data if nd.id == "g")
+        assert isinstance(grp_node, NodeGroup)
+
+    def test_group_inner_preserved(self):
+        inner = GraphBuilder().node(gn("x")).node(gn("y")).edge("x", "y").build()
+        g_node = ggrp("g", inner)
+        outer = GraphBuilder().node(g_node).node(gn("z")).edge("g", "z").build()
+        grp_node = next(nd for nd in outer.nodes_data if nd.id == "g")
+        assert {i.id for i in grp_node.inner.nodes_data} == {"x", "y"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class TestGraphBuilderCyclicIntegration:
+    def test_cyclic_graph_full_topology(self, cyclic_graph):
+        assert {n.id for n in cyclic_graph.nodes_data} == {"a", "b", "c"}
+        assert len(cyclic_graph.edges_data) == 3
+        assert cyclic_graph.entry_nodes() == set()
+        assert cyclic_graph.leaf_nodes() == set()
+
+    def test_acyclic_graph_full_topology(self, linear_graph):
+        assert linear_graph.is_acyclic() is True
+        a = next(x for x in linear_graph.nodes_data if x.id == "a")
+        assert {x.id for x in linear_graph.descendants_of(a)} == {"b", "c"}

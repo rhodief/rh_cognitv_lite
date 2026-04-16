@@ -1,10 +1,15 @@
-"""Phase 2 unit tests — _GraphEngine (in-house graph algorithms)."""
+"""Unit tests for _GraphEngine (in-house graph algorithms).
+
+Covers both the algorithms present in dag_engine (unchanged) and the
+new methods added in graph_engine: back_edges, nodes_in_cycles,
+successors_of, predecessors_of, reachable_from.
+"""
 
 from __future__ import annotations
 
 import pytest
 
-from rh_cognitv_lite.orchestrators.graphs.dag_engine import _GraphEngine
+from rh_cognitv_lite.orchestrators.graphs.graph_engine import _GraphEngine
 
 
 # ─────────────────────────────────────────────
@@ -287,3 +292,109 @@ class TestPathBetween:
         assert FORK.path_between("A", "B") == ["A", "B"]
         assert FORK.path_between("A", "C") == ["A", "C"]
         assert FORK.path_between("B", "C") is None
+
+
+# ─────────────────────────────────────────────
+# back_edges
+# ─────────────────────────────────────────────
+
+class TestBackEdges:
+    def test_acyclic_graph_has_no_back_edges(self):
+        assert LINEAR.back_edges() == set()
+
+    def test_diamond_has_no_back_edges(self):
+        assert DIAMOND.back_edges() == set()
+
+    def test_cyclic_graph_has_one_back_edge(self):
+        be = CYCLIC.back_edges()
+        # The cycle A→B→C→A has exactly one back edge.
+        # Which specific edge depends on DFS traversal order.
+        assert len(be) == 1
+        cycle_nodes = {"A", "B", "C"}
+        src, tgt = next(iter(be))
+        assert src in cycle_nodes
+        assert tgt in cycle_nodes
+
+    def test_self_loop_is_a_back_edge(self):
+        be = SELF_LOOP.back_edges()
+        assert ("A", "A") in be
+
+    def test_empty_graph_no_back_edges(self):
+        assert EMPTY.back_edges() == set()
+
+    def test_partial_cycle_back_edge(self):
+        # A → B → C → B  (B is in a loop with C); exactly one back edge
+        g = _GraphEngine({"A", "B", "C"}, {("A", "B"), ("B", "C"), ("C", "B")})
+        be = g.back_edges()
+        assert len(be) == 1
+        # The back edge must be between B and C (the cycle members)
+        src, tgt = next(iter(be))
+        assert {src, tgt} == {"B", "C"}
+
+
+# ─────────────────────────────────────────────
+# nodes_in_cycles
+# ─────────────────────────────────────────────
+
+class TestNodesInCycles:
+    def test_acyclic_graph_no_nodes_in_cycles(self):
+        assert LINEAR.nodes_in_cycles() == set()
+
+    def test_diamond_no_nodes_in_cycles(self):
+        assert DIAMOND.nodes_in_cycles() == set()
+
+    def test_full_cycle_all_nodes_in_cycle(self):
+        # A→B→C→A: all three are on the cycle
+        assert CYCLIC.nodes_in_cycles() == {"A", "B", "C"}
+
+    def test_self_loop_node_in_cycle(self):
+        assert SELF_LOOP.nodes_in_cycles() == {"A"}
+
+    def test_partial_cycle_only_cycle_nodes(self):
+        # A → B → C → B: A is not in the cycle; B and C are
+        g = _GraphEngine({"A", "B", "C"}, {("A", "B"), ("B", "C"), ("C", "B")})
+        in_cycle = g.nodes_in_cycles()
+        assert "A" not in in_cycle
+        assert "B" in in_cycle
+        assert "C" in in_cycle
+
+    def test_empty_graph_no_cycle_nodes(self):
+        assert EMPTY.nodes_in_cycles() == set()
+
+
+# ─────────────────────────────────────────────
+# successors_of / predecessors_of / reachable_from
+# ─────────────────────────────────────────────
+
+class TestSingleHopAccessors:
+    def test_successors_of_entry(self):
+        assert LINEAR.successors_of("A") == {"B"}
+
+    def test_successors_of_middle(self):
+        assert LINEAR.successors_of("B") == {"C"}
+
+    def test_successors_of_leaf(self):
+        assert LINEAR.successors_of("C") == set()
+
+    def test_successors_of_fork(self):
+        assert FORK.successors_of("A") == {"B", "C"}
+
+    def test_predecessors_of_leaf(self):
+        assert LINEAR.predecessors_of("C") == {"B"}
+
+    def test_predecessors_of_entry(self):
+        assert LINEAR.predecessors_of("A") == set()
+
+    def test_predecessors_of_diamond_d(self):
+        assert DIAMOND.predecessors_of("D") == {"B", "C"}
+
+    def test_reachable_from_is_alias_for_descendants(self):
+        assert LINEAR.reachable_from("A") == LINEAR.descendants_of("A")
+        assert DIAMOND.reachable_from("A") == DIAMOND.descendants_of("A")
+
+    def test_reachable_from_cyclic_graph(self):
+        # In CYCLIC A→B→C→A, every node can reach every other node (cycle-safe)
+        assert "B" in CYCLIC.reachable_from("A")
+        assert "C" in CYCLIC.reachable_from("A")
+        assert "A" in CYCLIC.reachable_from("A")  # back through cycle
+

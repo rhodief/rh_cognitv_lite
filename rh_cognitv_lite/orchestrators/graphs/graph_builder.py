@@ -1,52 +1,52 @@
-"""DAGBuilder — fluent, chainable construction API for DAG.
+"""GraphBuilder — fluent, chainable construction API for Graph.
 
-This is the sole legitimate way to construct a DAG instance.
+This is the sole legitimate way to construct a Graph instance.
 """
 
 from __future__ import annotations
 
-from rh_cognitv_lite.orchestrators.graphs.dag_engine import _GraphEngine
+from rh_cognitv_lite.orchestrators.graphs.graph_engine import _GraphEngine
 from rh_cognitv_lite.orchestrators.graphs.models import (
-    DAG,
-    DAGBuilderConfig,
     Edge,
+    Graph,
+    GraphBuilderConfig,
     Node,
     NodeGroup,
 )
 
 
-class DAGBuilder:
-    """Fluent builder that produces an immutable ``DAG``.
+class GraphBuilder:
+    """Fluent builder that produces an immutable ``Graph``.
 
     Parameters
     ----------
     name:
-        Human-readable label for this builder / the DAG being constructed.
-        Not persisted on the resulting ``DAG`` object (DAG is anonymous).
+        Human-readable label for this builder / the graph being constructed.
+        Not persisted on the resulting ``Graph`` object.
     config:
         Construction-time validation flags.  Defaults to
-        ``DAGBuilderConfig()`` (acyclic validation on, everything else off).
+        ``GraphBuilderConfig()`` — permissive (cycles allowed, isolated nodes
+        allowed, self-loops allowed).  Pass explicit flags to tighten
+        constraints, e.g. for enforcing acyclicity in workflow DAGs:
+        ``GraphBuilderConfig(validate_acyclic=True, allow_self_loops=False,
+        allow_isolated_nodes=False)``.
     """
 
     def __init__(
         self,
         name: str = "",
-        config: DAGBuilderConfig | None = None,
+        config: GraphBuilderConfig | None = None,
     ) -> None:
         self._name = name
-        self._config = config if config is not None else DAGBuilderConfig()
-        # Ordered list of nodes; preserves insertion order.
+        self._config = config if config is not None else GraphBuilderConfig()
         self._nodes: list[Node] = []
-        # id → node index for O(1) lookup.
         self._node_index: dict[str, int] = {}
-        # Ordered list of edges.
         self._edges: list[Edge] = []
-        # (source_id, target_id) → True — fast duplicate detection.
         self._edge_set: set[tuple[str, str]] = set()
 
     # ── Node registration ─────────────────────────────────────────────────────
 
-    def node(self, node_obj: Node) -> DAGBuilder:
+    def node(self, node_obj: Node) -> GraphBuilder:
         """Register a node.
 
         Parameters
@@ -75,7 +75,7 @@ class DAGBuilder:
         source: Node | str,
         target: Node | str,
         label: str | None = None,
-    ) -> DAGBuilder:
+    ) -> GraphBuilder:
         """Add a directed edge from *source* to *target*.
 
         Parameters
@@ -111,13 +111,13 @@ class DAGBuilder:
         if not self._config.allow_self_loops and src_id == tgt_id:
             raise ValueError(
                 f"Self-loop on node {src_id!r} is not allowed. "
-                "Set allow_self_loops=True in DAGBuilderConfig to permit this."
+                "Set allow_self_loops=True in GraphBuilderConfig to permit this."
             )
 
         if not self._config.allow_parallel_edges and (src_id, tgt_id) in self._edge_set:
             raise ValueError(
                 f"Parallel edge {src_id!r} → {tgt_id!r} already exists. "
-                "Set allow_parallel_edges=True in DAGBuilderConfig to permit this."
+                "Set allow_parallel_edges=True in GraphBuilderConfig to permit this."
             )
 
         if self._config.validate_acyclic:
@@ -125,7 +125,7 @@ class DAGBuilder:
             if engine.would_create_cycle(src_id, tgt_id):
                 raise ValueError(
                     f"Adding edge {src_id!r} → {tgt_id!r} would create a cycle. "
-                    "Set validate_acyclic=False in DAGBuilderConfig to skip this check."
+                    "Set validate_acyclic=False in GraphBuilderConfig to skip this check."
                 )
 
         self._edges.append(Edge(source=src_id, target=tgt_id, label=label))
@@ -134,12 +134,12 @@ class DAGBuilder:
 
     # ── Group registration ────────────────────────────────────────────────────
 
-    def group(self, group_node: NodeGroup) -> DAGBuilder:
+    def group(self, group_node: NodeGroup) -> GraphBuilder:
         """Register a ``NodeGroup`` (shorthand for ``node(group_node)``).
 
-        The inner ``DAG`` must already be built (use a nested ``DAGBuilder``
-        and call ``.build()`` to produce the inner ``DAG`` first, then wrap
-        it in a ``NodeGroup``).
+        The inner ``Graph`` must already be built (use a nested
+        ``GraphBuilder`` and call ``.build()`` to produce the inner ``Graph``
+        first, then wrap it in a ``NodeGroup``).
 
         Raises
         ------
@@ -156,7 +156,7 @@ class DAGBuilder:
 
     # ── Removal ───────────────────────────────────────────────────────────────
 
-    def remove_node(self, node_id: str) -> DAGBuilder:
+    def remove_node(self, node_id: str) -> GraphBuilder:
         """Remove a registered node and all edges that reference it.
 
         Raises
@@ -172,11 +172,8 @@ class DAGBuilder:
         if node_id not in self._node_index:
             raise ValueError(f"No node with id {node_id!r} is registered.")
 
-        # Remove node from list and rebuild index.
         self._nodes = [n for n in self._nodes if n.id != node_id]
         self._node_index = {n.id: i for i, n in enumerate(self._nodes)}
-
-        # Drop all edges that reference the removed node.
         self._edges = [
             e for e in self._edges
             if e.source != node_id and e.target != node_id
@@ -184,7 +181,7 @@ class DAGBuilder:
         self._edge_set = {(e.source, e.target) for e in self._edges}
         return self
 
-    def remove_edge(self, source: Node | str, target: Node | str) -> DAGBuilder:
+    def remove_edge(self, source: Node | str, target: Node | str) -> GraphBuilder:
         """Remove a specific directed edge.
 
         Raises
@@ -214,50 +211,36 @@ class DAGBuilder:
     # ── Continuation pattern ──────────────────────────────────────────────────
 
     @classmethod
-    def from_dag(cls, dag: DAG, name: str = "", config: DAGBuilderConfig | None = None) -> DAGBuilder:
-        """Seed a new builder with all nodes and edges from an existing ``DAG``.
+    def from_graph(
+        cls,
+        graph: Graph,
+        name: str = "",
+        config: GraphBuilderConfig | None = None,
+    ) -> GraphBuilder:
+        """Seed a new builder with all nodes and edges from an existing ``Graph``.
 
-        This is the continuation pattern for post-build modifications:
-        ``DAGBuilder.from_dag(dag).edge(...).build()``.
-
-        Parameters
-        ----------
-        dag:
-            The source DAG to copy from.
-        name:
-            Label for the new builder.
-        config:
-            Validation config for the new builder.  Defaults to
-            ``DAGBuilderConfig()`` (same as a fresh builder).
+        Continuation pattern for post-build modifications:
+        ``GraphBuilder.from_graph(g).edge(...).build()``.
         """
         builder = cls(name=name, config=config)
-        for node_obj in dag.nodes_data:
+        for node_obj in graph.nodes_data:
             builder.node(node_obj)
-        for edge_obj in dag.edges_data:
+        for edge_obj in graph.edges_data:
             builder._edges.append(edge_obj)
             builder._edge_set.add((edge_obj.source, edge_obj.target))
         return builder
 
     # ── Visualize pass-through ────────────────────────────────────────────────
 
-    def visualize(self, output_configs=None) -> None:
-        """Build a snapshot of the current builder state and render it.
-
-        Accepts the same *output_configs* argument as ``DAG.visualize()``.
-        """
-        snapshot = DAG._from_parts(list(self._nodes), list(self._edges))
-        if output_configs is None:
-            snapshot.visualize()
-        elif isinstance(output_configs, dict):
-            fmt = output_configs.pop("format", "terminal")
-            snapshot.visualize(fmt, **output_configs)
-        else:
-            snapshot.visualize(output_configs)
+    def visualize(self, format: str = "terminal", **options: object) -> None:
+        """Build a snapshot of the current builder state and render it."""
+        snapshot = Graph._from_parts(list(self._nodes), list(self._edges))
+        snapshot.visualize(format, **options)
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
-    def build(self) -> DAG:
-        """Apply all enabled validation flags and return an immutable ``DAG``.
+    def build(self) -> Graph:
+        """Apply all enabled validation flags and return an immutable ``Graph``.
 
         Raises
         ------
@@ -265,48 +248,40 @@ class DAGBuilder:
             If any enabled validation flag is violated.
         """
         self._apply_build_validations()
-        return DAG._from_parts(list(self._nodes), list(self._edges))
+        return Graph._from_parts(list(self._nodes), list(self._edges))
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _current_engine(self) -> _GraphEngine:
-        """Snapshot engine over the current builder state."""
         node_ids = {n.id for n in self._nodes}
         edge_pairs = {(e.source, e.target) for e in self._edges}
         return _GraphEngine(node_ids, edge_pairs)
 
     def _apply_build_validations(self) -> None:
-        """Run all validations that are gated at build time."""
         cfg = self._config
 
         if not cfg.allow_isolated_nodes:
-            referenced = set()
+            referenced: set[str] = set()
             for e in self._edges:
                 referenced.add(e.source)
                 referenced.add(e.target)
-            # An isolated node is registered but not referenced by any edge,
-            # unless the graph itself is a single-node graph with no edges.
             if self._edges or len(self._nodes) > 1:
                 for n in self._nodes:
                     if n.id not in referenced:
                         raise ValueError(
                             f"Node {n.id!r} is isolated (no edges). "
-                            "Set allow_isolated_nodes=True in DAGBuilderConfig "
+                            "Set allow_isolated_nodes=True in GraphBuilderConfig "
                             "to permit isolated nodes."
                         )
 
         if cfg.validate_connected and len(self._nodes) > 1:
-            dag = DAG._from_parts(list(self._nodes), list(self._edges))
-            dag.validate_connectedness()
+            graph = Graph._from_parts(list(self._nodes), list(self._edges))
+            graph.validate_connectedness()
 
-        # Acyclic validation on .edge() should have caught any cycles already,
-        # but run a final check if the flag is enabled (covers edge removal,
-        # force-added edges via from_dag, etc.).
         if cfg.validate_acyclic:
             engine = self._current_engine()
             if engine.has_cycle():
                 raise ValueError(
-                    "The graph contains a cycle. "
-                    "Set validate_acyclic=False in DAGBuilderConfig to skip "
-                    "this check."
+                    "Graph contains a cycle. "
+                    "Set validate_acyclic=False in GraphBuilderConfig to skip this check."
                 )
