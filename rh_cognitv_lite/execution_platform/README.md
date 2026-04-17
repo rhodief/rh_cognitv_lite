@@ -35,6 +35,8 @@ exec = Execution(
 | `input_data` | `ExecutionData` | `dict`, `Serializable`, or `None` |
 | `preconditions` | `list[Callable]` | Run before handler; return `False` to abort |
 | `postconditions` | `list[Callable]` | Run on handler output; return `False` to fail |
+| `retry_aware` | `bool` | When `True`, handler receives a `RetryContext` as its second argument on retry attempts |
+| `before_retry` | `Callable \| None` | Callback `(Execution, RetryContext) -> Execution \| None` invoked before each retry |
 
 ---
 
@@ -192,6 +194,73 @@ RetryConfig(
 
 Only errors with `retryable=True` trigger a retry. `TransientError` is retryable by default; `PermanentError` is not.
 
+### Retry-Aware Handlers
+
+Set `retry_aware=True` on an `Execution` so the handler receives a `RetryContext` on retry attempts. The first attempt always receives only `input_data`; subsequent attempts receive `(input_data, retry_context)`.
+
+```python
+from rh_cognitv_lite.execution_platform import Execution, RetryConfig, RetryContext
+
+def my_handler(data, retry_ctx: RetryContext | None = None):
+    if retry_ctx is not None:
+        print(f"Retry {retry_ctx.attempt}/{retry_ctx.max_attempts}")
+        print(f"Previous error: {retry_ctx.error_message}")
+        print(f"History: {len(retry_ctx.history)} prior failures")
+    return do_work(data)
+
+exec = Execution(
+    name="smart-retry",
+    handler=my_handler,
+    input_data={"key": "value"},
+    retry_aware=True,
+    retry_config=RetryConfig(max_attempts=3),
+)
+```
+
+#### `RetryContext`
+
+| Field | Type | Description |
+|---|---|---|
+| `attempt` | `int` | Current attempt number (≥ 2) |
+| `max_attempts` | `int` | Total attempts allowed |
+| `error_message` | `str` | Error message from the previous attempt |
+| `error_category` | `str` | Error category from the previous attempt |
+| `error_type` | `str` | Exception class name from the previous attempt |
+| `previous_result` | `ExecutionResult \| None` | Full result of the previous failed attempt |
+| `history` | `list[RetryAttemptRecord]` | All prior failed attempts |
+
+#### `RetryAttemptRecord`
+
+| Field | Type | Description |
+|---|---|---|
+| `attempt` | `int` | Attempt number |
+| `error_message` | `str` | Error message |
+| `error_category` | `str` | Error category |
+| `error_type` | `str` | Exception class name |
+| `duration_ms` | `float` | Duration of the attempt in milliseconds |
+
+### `before_retry` Callback
+
+Use `before_retry` to modify the `Execution` before a retry — for example, to adjust `input_data` based on the failure.
+
+```python
+def before_retry(exec_: Execution, ctx: RetryContext) -> Execution | None:
+    # Return a modified Execution, or None to keep the original
+    if "rate_limit" in ctx.error_message:
+        return exec_.model_copy(update={"input_data": {"throttled": True}})
+    return None
+
+exec = Execution(
+    name="adaptive",
+    handler=my_handler,
+    input_data={"throttled": False},
+    before_retry=before_retry,
+    retry_config=RetryConfig(max_attempts=3),
+)
+```
+
+If `before_retry` returns `None`, the original `Execution` is used unchanged.
+
 **Retry events** carry metadata in `ext`:
 ```python
 event.retried              # number of retries so far
@@ -252,12 +321,15 @@ Subscribers can be sync or async. Each event is also stored in `bus.events` for 
 
 ```
 CognitivError
-├── TransientError    retryable=True,  category=transient
-├── PermanentError    retryable=False, category=permanent
-├── InterruptError    retryable=False, category=interrupt
-├── EscalationError   retryable=False, category=escalation
-└── BudgetError       retryable=False, category=permanent
+├── TransientError          retryable=True,  category=transient
+│   └── OutputValidationError   retryable=True,  category=transient
+├── PermanentError          retryable=False, category=permanent
+├── InterruptError          retryable=False, category=interrupt
+├── EscalationError         retryable=False, category=escalation
+└── BudgetError             retryable=False, category=permanent
 ```
+
+`OutputValidationError` is a retryable error for handler output that fails validation — useful for LLM outputs that may need a re-generation.
 
 Raise `TransientError` from a handler to engage retry machinery:
 
@@ -303,10 +375,13 @@ from rh_cognitv_lite.execution_platform import (
     Serializable,
     CheckSchema,
     RetryConfig,
+    RetryContext,
+    RetryAttemptRecord,
     TimeoutConfig,
     ParallelConfig,
     TransientError,
     PermanentError,
+    OutputValidationError,
     InterruptError,
     ErrorCategory,
     EventStatus,
