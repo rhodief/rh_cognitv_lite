@@ -17,6 +17,13 @@ from .capabilities import (
     BaseTool,
     BaseWorkflow,
 )
+from .context import (
+    ContextRef,
+    ContextResolverProtocol,
+    ContextResolverRegistry,
+    ContextStore,
+    ScopeFrame,
+)
 from .execution_graph import (
     ExecutionGraph,
     ExecutionGraphBuilder,
@@ -57,6 +64,12 @@ __all__ = [
     "BaseSkill",
     "BaseTool",
     "BaseWorkflow",
+    # context
+    "ContextRef",
+    "ContextResolverProtocol",
+    "ContextResolverRegistry",
+    "ContextStore",
+    "ScopeFrame",
     # execution graph
     "ExecutionGraph",
     "ExecutionGraphBuilder",
