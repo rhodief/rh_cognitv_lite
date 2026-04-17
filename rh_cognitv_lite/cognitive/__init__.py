@@ -5,11 +5,21 @@ from .adapters.llm_adapter import (
     LLMResponse,
     ToolCall,
 )
+from .adapters.node_adapters import (
+    ExecutionNodeAdapterProtocol,
+    FunctionNodeAdapter,
+    ObjectNodeAdapter,
+    TextNodeAdapter,
+)
 from .capabilities import (
     BaseCapability,
     BaseSkill,
     BaseTool,
     BaseWorkflow,
+)
+from .execution_graph import (
+    ExecutionGraph,
+    ExecutionGraphBuilder,
 )
 from .nodes import (
     BaseExecutionNode,
@@ -37,11 +47,19 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "ToolCall",
+    # node adapters
+    "ExecutionNodeAdapterProtocol",
+    "FunctionNodeAdapter",
+    "ObjectNodeAdapter",
+    "TextNodeAdapter",
     # capabilities
     "BaseCapability",
     "BaseSkill",
     "BaseTool",
     "BaseWorkflow",
+    # execution graph
+    "ExecutionGraph",
+    "ExecutionGraphBuilder",
     # results
     "CognitiveResult",
     "EscalationInfo",
