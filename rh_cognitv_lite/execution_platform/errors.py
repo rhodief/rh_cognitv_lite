@@ -162,3 +162,22 @@ class ValidationError(PermanentError):
         original: Exception | None = None,
     ) -> None:
         super().__init__(message, attempt=attempt, original=original)
+
+
+class OutputValidationError(TransientError):
+    """LLM output validation failed — retryable.
+
+    Raised when structured output from an LLM does not match the expected
+    schema or Pydantic model.  Treated as transient so that the platform
+    retry loop can re-invoke the handler (with optional self-correction
+    context when ``retry_aware=True``).
+    """
+
+    def __init__(
+        self,
+        message: str = "Output validation failed",
+        *,
+        attempt: int = 0,
+        original: Exception | None = None,
+    ) -> None:
+        super().__init__(message, attempt=attempt, original=original)

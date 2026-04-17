@@ -19,7 +19,7 @@ from rh_cognitv_lite.execution_platform.events import (
     InterruptReason,
     InterruptSignal,
 )
-from rh_cognitv_lite.execution_platform.models import EventStatus, ExecutionResult, ResultMetadata, RetryConfig, TimeoutConfig, ParallelConfig
+from rh_cognitv_lite.execution_platform.models import EventStatus, ExecutionResult, ResultMetadata, RetryConfig, TimeoutConfig, ParallelConfig, RetryContext, RetryAttemptRecord
 from rh_cognitv_lite.execution_platform.types import now_timestamp
 
 
@@ -94,6 +94,8 @@ class Execution(BaseModel):
     policies: list[Any] | None = None
     attempt: int = 1  # set by runners on retry; drives retried= in emitted events
     retry_config: RetryConfig | None = None
+    retry_aware: bool = False  # if True, handler receives RetryContext as second arg on retries
+    before_retry: Callable[..., Any] | None = None  # callback(Execution, RetryContext) → Execution | None
     model_config = {"arbitrary_types_allowed": True}
 
     
@@ -127,17 +129,45 @@ class ExecutionPlatform:
         retry_config = input_execution.retry_config
         max_attempts = retry_config.max_attempts if retry_config else 1
         result: ExecutionResult[Any] | None = None
+        retry_history: list[RetryAttemptRecord] = []
 
         for attempt in range(1, max_attempts + 1):
-            exec_item = (
-                input_execution
-                if attempt == 1
-                else input_execution.model_copy(update={"attempt": attempt})
-            )
-            result = await self._execute_once(exec_item)
+            exec_item = input_execution
+            retry_context: RetryContext | None = None
+
+            if attempt > 1 and result is not None:
+                # Build retry context from previous failure
+                retry_context = RetryContext(
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    error_message=result.error_message or "",
+                    error_category=result.error_category or "",
+                    error_type=(result.error_details or {}).get("type", "Unknown"),
+                    previous_result=result,
+                    history=list(retry_history),
+                )
+
+                # Call before_retry callback if provided (advanced control)
+                if exec_item.before_retry is not None:
+                    modified = exec_item.before_retry(exec_item, retry_context)
+                    if modified is not None:
+                        exec_item = modified
+
+                exec_item = exec_item.model_copy(update={"attempt": attempt})
+
+            result = await self._execute_once(exec_item, retry_context=retry_context)
 
             if result.ok:
                 return result
+
+            # Record attempt in history
+            retry_history.append(RetryAttemptRecord(
+                attempt=attempt,
+                error_message=result.error_message or "",
+                error_category=result.error_category or "",
+                error_type=(result.error_details or {}).get("type", "Unknown"),
+                duration_ms=result.metadata.duration_ms,
+            ))
 
             retryable = (
                 result.error_details.get("retryable", False)
@@ -152,7 +182,9 @@ class ExecutionPlatform:
 
         return result  # type: ignore[return-value]
 
-    async def _execute_once(self, input_execution: Execution) -> ExecutionResult[Any]:
+    async def _execute_once(
+        self, input_execution: Execution, *, retry_context: RetryContext | None = None
+    ) -> ExecutionResult[Any]:
         started_at = now_timestamp()
         t_start = time.monotonic()
 
@@ -254,10 +286,18 @@ class ExecutionPlatform:
                 raise TransientError(
                     f"input_data must be a dict, Serializable, or None — got {type(input_execution.input_data).__name__!r}"
                 )
-            if inspect.iscoroutinefunction(input_execution.handler):
-                result_data: ExecutionData = await input_execution.handler(input_execution.input_data)
+
+            # Build handler arguments
+            handler_args: tuple[Any, ...]
+            if input_execution.retry_aware and retry_context is not None:
+                handler_args = (input_execution.input_data, retry_context)
             else:
-                result_data = input_execution.handler(input_execution.input_data)
+                handler_args = (input_execution.input_data,)
+
+            if inspect.iscoroutinefunction(input_execution.handler):
+                result_data: ExecutionData = await input_execution.handler(*handler_args)
+            else:
+                result_data = input_execution.handler(*handler_args)
         except Exception as exc:
             completed_at = now_timestamp()
             duration_ms = (time.monotonic() - t_start) * 1000

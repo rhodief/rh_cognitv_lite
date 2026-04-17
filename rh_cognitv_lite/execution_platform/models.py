@@ -67,6 +67,36 @@ class ExecutionResult(BaseModel, Generic[T]):
 
 
 # ──────────────────────────────────────────────
+# Retry-Aware Models (DD-12)
+# ──────────────────────────────────────────────
+
+
+class RetryAttemptRecord(BaseModel):
+    """Record of a single failed retry attempt."""
+
+    attempt: int
+    error_message: str
+    error_category: str
+    error_type: str
+    duration_ms: float
+
+
+class RetryContext(BaseModel):
+    """Injected into the handler on retry when retry_aware=True.
+
+    Only present on attempt 2+.  First attempt always receives no context.
+    """
+
+    attempt: int                                        # current attempt (2+)
+    max_attempts: int                                   # from RetryConfig
+    error_message: str                                  # what went wrong on the previous attempt
+    error_category: str                                 # ErrorCategory value
+    error_type: str                                     # exception class name
+    previous_result: ExecutionResult | None = None      # full result from the previous attempt
+    history: list[RetryAttemptRecord] = Field(default_factory=list)  # all previous attempts
+
+
+# ──────────────────────────────────────────────
 # Budget Snapshot
 # ──────────────────────────────────────────────
 

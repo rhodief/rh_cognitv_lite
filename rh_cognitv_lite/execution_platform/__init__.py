@@ -4,6 +4,7 @@ from .errors import (
     ErrorCategory,
     EscalationError,
     InterruptError,
+    OutputValidationError,
     PermanentError,
     TransientError,
 )
@@ -24,7 +25,9 @@ from .models import (
     ExecutionResult,
     ParallelConfig,
     ResultMetadata,
+    RetryAttemptRecord,
     RetryConfig,
+    RetryContext,
     TimeoutConfig,
 )
 
@@ -35,6 +38,7 @@ __all__ = [
     "ErrorCategory",
     "EscalationError",
     "InterruptError",
+    "OutputValidationError",
     "PermanentError",
     "TransientError",
     # event_bus
@@ -61,7 +65,9 @@ __all__ = [
     "ExecutionResult",
     "ParallelConfig",
     "ResultMetadata",
+    "RetryAttemptRecord",
     "RetryConfig",
+    "RetryContext",
     "TimeoutConfig",
 ]
 
