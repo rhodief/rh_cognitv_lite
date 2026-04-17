@@ -14,13 +14,13 @@ BaseSkill[BaseCapability]
     - LMM Configs
     
 
-Tool[BaseCapability]
+BaseTool[BaseCapability]
     - handler: actual function to be called
 
-Workflow[BaseCapability]
+BaseWorkflow[BaseCapability]
     ... the register gets a subgraph, which the Nodes for the workflow
 
-PlanReview[BaseCapability]
+PlanReview[BaseSkill]
     ... The graphs are
         PlanReviewGraph[Skill.ObjectNode] -> LoopGraph.forEach(ExecutionStep, ExecutionGraph[Skill.ObjectNode]) -> PlanReviewGraph [Cyclic]
 
@@ -59,6 +59,13 @@ Orchestrator
     In other words, it's gonna connect the cognitive layer (Capabilities stuff: skills, tools, PlanReviewSkill, Workflows, Recorder(I notebook for annotations) etc...) to execution_plataform based on serializable state control
 
     The events used on Execution Platform Event Bus is, for now, just for log and register, not for distributed execution, in the future it will be but now worries about it for now. The results of the execution (the execution history) will be held by the orchestrator
+
+
+General Design Guides
+- Everything should be built upon dependency inversion, all specific implementation should come as param through a contract.
+- Orchestrator owns the execution. it ties together all the application contracts, but external implementation should be outside as adapter (the real backend)
+- The orchestrator, based on cognitive definitions (capabilities), is gonna create the ExecutionGraph and control its state. The executionGraph is gonna create the respective execution based on ExecutionPlatform.
+- The main layers which is cognitive, execution_platform and orchestrators should be separated, with adapter that ties them together. 
 
     
     
