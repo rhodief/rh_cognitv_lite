@@ -5,12 +5,23 @@ from .adapters.llm_adapter import (
     LLMResponse,
     ToolCall,
 )
+from .capabilities import (
+    BaseCapability,
+    BaseSkill,
+    BaseTool,
+    BaseWorkflow,
+)
 from .nodes import (
     BaseExecutionNode,
     FunctionNode,
     LLMConfig,
     ObjectNode,
     TextNode,
+)
+from .results import (
+    CognitiveResult,
+    EscalationInfo,
+    FailInfo,
 )
 
 __all__ = [
@@ -26,4 +37,13 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "ToolCall",
+    # capabilities
+    "BaseCapability",
+    "BaseSkill",
+    "BaseTool",
+    "BaseWorkflow",
+    # results
+    "CognitiveResult",
+    "EscalationInfo",
+    "FailInfo",
 ]
