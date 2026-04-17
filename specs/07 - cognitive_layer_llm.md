@@ -71,7 +71,10 @@ class BaseExecutionNode(BaseModel):
     metadata: dict[str, Any] = {}               # open-ended extension
 ```
 
-All three node types inherit from this.
+All node types inherit from this. Nodes are classified into two categories via the `category` field:
+
+- **`"action"`** — Nodes that perform work: LLM calls, function invocations. (`TextNode`, `ObjectNode`, `FunctionNode`)
+- **`"flow"`** — Nodes that control execution flow without performing work themselves. (`ForEachNode`)
 
 ### 2.2 `TextNode`
 
@@ -122,6 +125,25 @@ class LLMConfig(BaseModel):
     tool_definitions: list[dict[str, Any]] = [] # function/tool schemas for ObjectNode
     extra: dict[str, Any] = {}                  # provider-specific params
 ```
+
+### 2.6 `ForEachNode`
+
+Represents a **flow-control node** that iterates over a list and executes a given action node (or node group) for each element. The `ForEachNode` is not an LLM call — it's an orchestration primitive that lives in the cognitive layer rather than the graph layer, keeping the graph topology lean.
+
+**Why not use the graph layer for iteration?** The `Graph` is a static topology map. Iteration over a dynamic-length list is a runtime concern — the number of iterations is not known at graph-construction time. A flow node encapsulates this cleanly: the graph sees one node; the orchestrator knows to expand it at runtime.
+
+```python
+class ForEachNode(BaseExecutionNode):
+    kind: Literal["for_each"] = "for_each"
+    category: Literal["flow"] = "flow"
+    items_ref: str                              # ContextRef key pointing to the input list
+    body_node: BaseExecutionNode                # node (or node group) to execute per element
+    parallel: bool = False                      # if True, iterations run concurrently
+    max_workers: int | None = None              # max concurrent iterations (None = unbounded; only when parallel=True)
+    result_key: str | None = None               # ContextStore key for the collected list of results
+```
+
+**⬇ See DD-18 for full design decisions.**
 
 ---
 
@@ -1290,6 +1312,94 @@ class Edge(BaseModel):
 
 ---
 
+### DD-18 — ForEachNode: Flow-Control Iteration Node *(from DD-06/DD-13)*
+
+**Issue:** Several specs reference a `ForEachNode` pattern (Spec 001, DD-06 ContextRef scoping, DD-13 ContextStore iteration frames), but the node itself has never been designed. The need is clear: a capability often needs to iterate over a dynamic list (e.g. a planner produces N steps, each must be executed). The graph is a static topology — it cannot represent dynamic-length iteration. A dedicated flow-control node handles this at the cognitive layer without bloating the graph.
+
+This DD covers four sub-decisions:
+
+---
+
+#### DD-18a — Node Category Classification ✅
+
+**Decision:** Option B — Add `category` field to `BaseExecutionNode`.
+
+Add `category: Literal["action", "flow"]` to `BaseExecutionNode`. Action nodes (`TextNode`, `ObjectNode`, `FunctionNode`) default to `"action"`. Flow nodes (`ForEachNode`, future control nodes) default to `"flow"`.
+
+```python
+class BaseExecutionNode(BaseModel):
+    id: str
+    name: str
+    description: str
+    category: Literal["action", "flow"] = "action"
+    # ... rest unchanged
+```
+
+| Pros | Cons |
+|---|---|
+| Generic classification — orchestrator can branch on `category` | New field on base class — minor schema change |
+| Extensible — future flow nodes (`ConditionalNode`, `WhileNode`) also carry `category = "flow"` | Slight coupling — category must be consistent with kind |
+| Adapter registry can route by category before kind | |
+
+---
+
+#### DD-18b — Body Node: `list[BaseExecutionNode]` ✅
+
+**Decision:** Option C — `body_nodes: list[BaseExecutionNode]`, always a list.
+
+The body is always a list of nodes executed sequentially within each iteration. Single-node case is `[node]`. No union types, clean serialization.
+
+```python
+class ForEachNode(BaseExecutionNode):
+    body_nodes: list[BaseExecutionNode]         # sequential steps per iteration
+```
+
+| Pros | Cons |
+|---|---|
+| Uniform — always a list, no union | Slightly verbose for single-node case |
+| Clear semantics — list is sequential within each iteration | Must decide ordering semantics (always sequential?) |
+| Easy to validate — no empty list | |
+
+---
+
+#### DD-18c — Parallel Execution Strategy ✅
+
+**Decision:** Option A — Reuse `ParallelRunner` directly.
+
+The orchestrator expands `ForEachNode` into N `Execution` objects and feeds them to the existing `ParallelRunner` with `max_workers` as the concurrency limit. For sequential mode (`parallel=False`), iterations run one-by-one in a loop.
+
+| Pros | Cons |
+|---|---|
+| Reuses existing infrastructure — no new concurrency code | `ParallelRunner` operates on `Execution` objects — must convert body nodes first |
+| `max_workers` maps directly to runner config | All iterations share a single runner invocation — error handling is all-or-nothing |
+| Consistent with platform execution model | |
+
+---
+
+#### DD-18d — Per-Iteration Context Scoping ✅
+
+**Decision:** Option A — Collect into parent frame under `result_key`.
+
+After all iterations complete, the `ForEachNode` handler collects results from each iteration's frame (before popping) and writes a list to the parent frame under `result_key`. This keeps the frame stack clean and gives downstream nodes a simple list to work with.
+
+```python
+# After iteration i completes:
+iteration_result = context_store.get("result")  # from iteration frame
+collected.append(iteration_result)
+context_store.pop_frame()
+
+# After all iterations:
+context_store.put(node.result_key, collected)    # in parent frame
+```
+
+| Pros | Cons |
+|---|---|
+| Clean — parent frame gets a list of results | Must collect before popping (ordering matters) |
+| Downstream nodes access `result_key` as a normal context ref | If an iteration fails, partial results may be lost on pop |
+| Consistent with frame-stack semantics | |
+
+---
+
 ## 11. Development Phases
 
 ### Phase 0 — Execution Platform: Retry-Aware Extension (DD-12)
@@ -1321,7 +1431,7 @@ class Edge(BaseModel):
 | `CognitiveResult`, `EscalationInfo`, `FailInfo` | `cognitive/results.py` |
 | **Tests:** capability hierarchy, `register_execution_graph()` contract, result types | `tests/cognitive/test_capabilities.py` |
 
-### Phase 3 — ExecutionGraph
+### Phase 3 — ExecutionGraph & Node Adapters (DD-04)
 
 | Task | Where |
 |---|---|
@@ -1329,22 +1439,57 @@ class Edge(BaseModel):
 | `ExecutionNodeAdapter` protocol + concrete adapters for Text/Object/Function | `cognitive/adapters/` |
 | **Tests:** graph construction from nodes, execution conversion, serialization round-trip | `tests/cognitive/test_execution_graph.py` |
 
-### Phase 4 — Orchestrator (v1)
+### Phase 4 — ContextStore & Context Injection (DD-06, DD-13)
+
+| Task | Where |
+|---|---|
+| `ContextRef` model (`scope`, `key`) | `cognitive/context.py` |
+| `ScopeFrame` model | `cognitive/context.py` |
+| `ContextStore` — frame stack, `push_frame`, `pop_frame`, `put`, `get`, `get_scoped`, `snapshot`, `restore` | `cognitive/context.py` |
+| `ContextResolverRegistry` — register resolvers by scope, resolve `ContextRef` lists | `cognitive/context.py` |
+| **Tests:** push/pop frames, scoped lookups, shadowing, snapshot/restore round-trip, resolver registry | `tests/cognitive/test_context.py` |
+
+### Phase 5 — ForEachNode & Flow-Control Adapter (DD-18)
+
+| Task | Where |
+|---|---|
+| `category` field on `BaseExecutionNode` (`"action"` default) | `cognitive/nodes.py` |
+| `ForEachNode` model (`kind="for_each"`, `category="flow"`, `items_ref`, `body_nodes`, `parallel`, `max_workers`, `result_key`) | `cognitive/nodes.py` |
+| `ForEachNodeAdapter` — expands iterations, manages context frames, delegates to `ParallelRunner` or sequential loop | `cognitive/adapters/` |
+| Update `__init__.py` exports | `cognitive/__init__.py` |
+| **Tests:** ForEachNode model validation, sequential iteration, parallel iteration with max_workers, context frame push/pop per iteration, result collection under result_key, empty list handling, error propagation | `tests/cognitive/test_for_each.py` |
+
+### Phase 6 — Capability Registry & Cognitive Telemetry (DD-15, DD-16)
+
+| Task | Where |
+|---|---|
+| `CapabilityRegistry` — register, get, list_all, list_by_type, has, unregister, duplicate-ID validation | `cognitive/registry.py` |
+| `CognitiveEventAdapter` — `node_started`, `node_completed`, `graph_started`, `graph_completed` event builders | `cognitive/telemetry.py` |
+| **Tests:** registry CRUD, duplicate ID rejection, type filtering; event adapter builds correct `ExecutionEvent` shape | `tests/cognitive/test_registry.py`, `tests/cognitive/test_telemetry.py` |
+
+### Phase 7 — Orchestrator (v1) (DD-07, DD-14, DD-17)
 
 | Task | Where |
 |---|---|
 | `OrchestratorState`, `OrchestratorResult` | `cognitive/orchestrator.py` |
 | `Orchestrator` — register capabilities, execute, snapshot/restore | `cognitive/orchestrator.py` |
-| Context injection (`ContextRef` resolution) | `cognitive/orchestrator.py` |
-| **Tests:** full execution loop with mock LLM adapter, fan-out parallel, snapshot/restore round-trip | `tests/cognitive/test_orchestrator.py` |
+| Context injection via `ContextResolverRegistry` + `ContextStore` | `cognitive/orchestrator.py` |
+| `TokenBudget` model — `record`, `exceeded`, `remaining` | `cognitive/budget.py` |
+| `BudgetPolicy(PolicyProtocol)` — `before_execute`, `after_execute` enforcement | `cognitive/budget.py` |
+| `CycleConfig` — `max_iterations`, `convergence_check` callable | `cognitive/orchestrator.py` |
+| Cycle detection + termination in graph walker | `cognitive/orchestrator.py` |
+| **Tests:** full execution loop with mock LLM adapter, fan-out parallel, snapshot/restore round-trip, budget enforcement + exceeded interrupt, cycle termination (cap + convergence) | `tests/cognitive/test_orchestrator.py`, `tests/cognitive/test_budget.py` |
 
-### Phase 5 — Integration Tests
+### Phase 8 — Integration Tests
 
 | Task | Where |
 |---|---|
 | End-to-end: define a skill with TextNode + ObjectNode + FunctionNode, execute via orchestrator | `tests/cognitive/test_integration.py` |
 | Workflow with sub-graph (`BaseWorkflow` + `NodeGroup`) | `tests/cognitive/test_integration.py` |
 | Snapshot mid-execution, restore, resume | `tests/cognitive/test_integration.py` |
+| Budget tracking across multi-node execution | `tests/cognitive/test_integration.py` |
+| Cyclic graph with convergence exit | `tests/cognitive/test_integration.py` |
+| ForEachNode: sequential + parallel iteration over dynamic list, nested ForEach | `tests/cognitive/test_integration.py` |
 
 ---
 
