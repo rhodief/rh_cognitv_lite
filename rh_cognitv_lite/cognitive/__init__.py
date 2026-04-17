@@ -40,10 +40,16 @@ from .nodes import (
     ObjectNode,
     TextNode,
 )
+from .registry import (
+    CapabilityRegistry,
+)
 from .results import (
     CognitiveResult,
     EscalationInfo,
     FailInfo,
+)
+from .telemetry import (
+    CognitiveEventAdapter,
 )
 
 __all__ = [
@@ -81,8 +87,12 @@ __all__ = [
     # execution graph
     "ExecutionGraph",
     "ExecutionGraphBuilder",
+    # registry
+    "CapabilityRegistry",
     # results
     "CognitiveResult",
     "EscalationInfo",
     "FailInfo",
+    # telemetry
+    "CognitiveEventAdapter",
 ]
