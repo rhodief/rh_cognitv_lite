@@ -33,6 +33,7 @@ class BaseExecutionNode(BaseModel):
     id: str
     name: str
     description: str
+    category: Literal["action", "flow"] = "action"
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -64,5 +65,23 @@ class FunctionNode(BaseExecutionNode):
 
     kind: Literal["function"] = "function"
     handler: Callable[..., Any]
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class ForEachNode(BaseExecutionNode):
+    """Flow-control node that iterates over a list and executes body nodes per element.
+
+    The graph sees one node; the orchestrator expands it at runtime into
+    N iterations over the list referenced by ``items_ref``.
+    """
+
+    kind: Literal["for_each"] = "for_each"
+    category: Literal["action", "flow"] = "flow"
+    items_ref: str
+    body_nodes: list[BaseExecutionNode]
+    parallel: bool = False
+    max_workers: int | None = None
+    result_key: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}

@@ -5,6 +5,10 @@ from .adapters.llm_adapter import (
     LLMResponse,
     ToolCall,
 )
+from .adapters.for_each_adapter import (
+    BodyAdapterFn,
+    ForEachNodeAdapter,
+)
 from .adapters.node_adapters import (
     ExecutionNodeAdapterProtocol,
     FunctionNodeAdapter,
@@ -30,6 +34,7 @@ from .execution_graph import (
 )
 from .nodes import (
     BaseExecutionNode,
+    ForEachNode,
     FunctionNode,
     LLMConfig,
     ObjectNode,
@@ -44,6 +49,7 @@ from .results import (
 __all__ = [
     # nodes
     "BaseExecutionNode",
+    "ForEachNode",
     "FunctionNode",
     "LLMConfig",
     "ObjectNode",
@@ -55,7 +61,9 @@ __all__ = [
     "LLMResponse",
     "ToolCall",
     # node adapters
+    "BodyAdapterFn",
     "ExecutionNodeAdapterProtocol",
+    "ForEachNodeAdapter",
     "FunctionNodeAdapter",
     "ObjectNodeAdapter",
     "TextNodeAdapter",
